@@ -1,8 +1,12 @@
 (() => {
-  const match = window.location.href.match(/\/(?:contest|problemset\/problem)\/(\d+)\/(?:problem\/)?([A-Z0-9]+)/i);
+  const match = window.location.pathname.match(/(?:\/contest\/(\d+)\/problem|\/problemset\/problem\/(\d+))\/([A-Z0-9]+)/i);
+
   if (!match) return;
 
-  const problemKey = match[1] + match[2];
+  const contestId = match[1] || match[2];
+  const problemIndex = match[3];
+  
+  const problemKey = contestId + problemIndex;
 
   async function getRating() {
     try {
@@ -13,7 +17,7 @@
       let rating = ratingsMap ? ratingsMap[problemKey] : null;
 
       const isTooOld = now - cfTime > 86400000; // 24 hours
-      const shouldCheckNew = !rating && now - cfTime > 43200000; // 1 hour
+      const shouldCheckNew = !rating && now - cfTime > 43200000; // 12 hour
 
       if (!ratingsMap || isTooOld || shouldCheckNew) {
         try {
