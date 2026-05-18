@@ -1,44 +1,75 @@
 (() => {
-  const match = window.location.pathname.match(/(?:\/contest\/(\d+)\/problem|\/problemset\/problem\/(\d+))\/([A-Z0-9]+)/i);
-
+  const match = window.location.pathname.match(/(?:\/contest\/(\d+)\/problem|\/problemset\/problem\/(\d+))\/([A-Za-z0-9]+)/);
   if (!match) return;
 
   const contestId = match[1] || match[2];
-  const problemIndex = match[3];
-  
+  const problemIndex = match[3].toUpperCase();
   const problemKey = contestId + problemIndex;
 
   async function getRating() {
     try {
-      const { cfRatings, cfTime = 0 } = await chrome.storage.local.get(["cfRatings", "cfTime"]);
+      let { cfRatings = {}, cfTime = 0 } = await chrome.storage.local.get(["cfRatings", "cfTime"]);
       const now = Date.now();
-      
-      let ratingsMap = cfRatings;
-      let rating = ratingsMap ? ratingsMap[problemKey] : null;
-
       const isTooOld = now - cfTime > 86400000; // 24 hours
-      const shouldCheckNew = !rating && now - cfTime > 43200000; // 12 hour
 
-      if (!ratingsMap || isTooOld || shouldCheckNew) {
+      if (Object.keys(cfRatings).length === 0 || isTooOld) {
         try {
           const res = await fetch("https://codeforces.com/api/problemset.problems");
           if (res.ok) {
             const data = await res.json();
-            ratingsMap = {};
-            
-            for (let i = 0; i < data.result.problems.length; i++) {
-              const p = data.result.problems[i];
-              if (p.rating) ratingsMap[p.contestId + p.index] = p.rating;
+
+            cfRatings = {};
+
+            for (const p of data.result.problems) {
+              if (p.rating) {
+                cfRatings[p.contestId + p.index] = p.rating;
+              }
             }
-            
-            rating = ratingsMap[problemKey];
-            
-            chrome.storage.local.set({ cfRatings: ratingsMap, cfTime: now });
+
+            cfTime = now;
+            await chrome.storage.local.set({ cfRatings, cfTime });
           }
-        } catch (e) {} 
+        } catch (e) {
+          console.error("Failed to fetch global problemset:", e);
+        }
+      }
+
+      let rating = cfRatings[problemKey];
+
+      if (!rating && cfRatings[problemKey] !== 'UNRATED') {
+        try {
+          const res = await fetch(`https://codeforces.com/api/contest.standings?contestId=${contestId}`);
+          if (res.ok) {
+            const data = await res.json();
+            let madeChanges = false;
+
+            for (const p of data.result.problems) {
+              const key = p.contestId + p.index;
+
+              if (p.rating && !cfRatings[key]) {
+                cfRatings[key] = p.rating;
+                madeChanges = true;
+              }
+            }
+
+            if (!cfRatings[problemKey]) {
+              cfRatings[problemKey] = 'UNRATED';
+              madeChanges = true;
+            }
+
+            if (madeChanges) {
+              await chrome.storage.local.set({ cfRatings });
+            }
+
+            rating = cfRatings[problemKey];
+          }
+        } catch (e) {
+          console.error("Failed to fetch contest standings fallback:", e);
+        }
       }
 
       if (!rating) return;
+      if (rating === 'UNRATED') rating = 'N/A';
 
       const sidebar = document.getElementById("sidebar");
       if (sidebar) {
@@ -55,7 +86,9 @@
             </div></div>
           </div>`);
       }
-    } catch (err) {}
+    } catch (err) {
+      console.error("Extension Error:", err);
+    }
   }
 
   getRating();
